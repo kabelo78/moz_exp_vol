@@ -1,97 +1,40 @@
 blueprint:
-  name: B&O Mozart – Expand + (Optional) Volume Sync
-  description: >
-    1) Automatically expand a B&O Mozart master device by adding another 
-    device (via JID) when the master enters a chosen state (e.g. playing).
-    2) If enabled, also sync the slave volume to the master.
-
+  name: "Moz Exp Vol with Conditions"
+  description: "Automation for controlling volume with added conditions."
   domain: automation
-
   input:
-    master_device:
-      name: Master Device
-      description: "The B&O Mozart speaker that will expand and optionally control volume."
+    media_player:
+      name: Media Player
       selector:
         entity:
-          integration: bang_olufsen
           domain: media_player
-
-    slave_device:
-      name: Slave Device (for Volume Sync)
-      description: >
-        The B&O Mozart speaker to be added to the master’s group,
-        and optionally have its volume synced to the master's.
+    volume_level:
+      name: Volume Level
+      description: "The volume level to set"
       selector:
-        entity:
-          integration: bang_olufsen
-          domain: media_player
-
-    slave_jid:
-      name: Slave JID
-      description: >
-        JID of the device to be added when the master expands, for example:
-        1111.2222222.33333333@products.bang-olufsen.com
+        number:
+          min: 0.0
+          max: 1.0
+          step: 0.05
+    conditions:
+      name: Conditions
+      description: "Optional conditions that must be met for the automation to run."
+      default: []
       selector:
-        text:
+        condition: {}
 
-    trigger_condition:
-      name: Trigger Condition
-      description: >
-        The master's state that triggers expansion (commonly "playing" or "on").
-      selector:
-        select:
-          options:
-            - "playing"
-            - "on"
-
-    sync_volume:
-      name: Sync Volume?
-      description: >
-        If true, whenever the master's volume changes, 
-        set the slave's volume to match.
-      default: false
-      selector:
-        boolean:
+mode: restart
 
 trigger:
-  # Trigger A: Expand when the master changes to the specified trigger_condition
-  - platform: state
-    entity_id: !input master_device
-    to: !input trigger_condition
-    id: expand_trigger
+  platform: state
+  entity_id: !input media_player
+  attribute: volume_level
 
-  # Trigger B: Volume sync whenever the master’s volume changes (attribute: volume_level)
-  - platform: state
-    entity_id: !input master_device
-    attribute: volume_level
-    id: volume_sync_trigger
-
-variables:
-  # We'll store whether the user wants volume sync in a variable
-  is_sync_volume: !input sync_volume
+condition: !input conditions
 
 action:
-  - choose:
-      # -- Condition 1: If the expand_trigger fired, call the expand service
-      - conditions:
-          - condition: template
-            value_template: "{{ trigger.id == 'expand_trigger' }}"
-        sequence:
-          - service: bang_olufsen.beolink_expand
-            target:
-              entity_id: !input master_device
-            data:
-              beolink_jids:
-                - !input slave_jid
-
-      # -- Condition 2: If the volume_sync_trigger fired AND sync_volume is true, sync volumes
-      - conditions:
-          - condition: template
-            value_template: "{{ trigger.id == 'volume_sync_trigger' and is_sync_volume }}"
-        sequence:
-          - service: media_player.volume_set
-            target:
-              entity_id: !input slave_device
-            data:
-              volume_level: "{{ trigger.to_state.attributes.volume_level }}"
-    default: []
+  - service: media_player.volume_set
+    target:
+      entity_id: !input media_player
+    data:
+      volume_level: !input volume_level
