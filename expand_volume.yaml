@@ -1,40 +1,103 @@
 blueprint:
-  name: "Moz Exp Vol with Conditions"
-  description: "Automation for controlling volume with added conditions."
+  name: B&O Mozart – Expand + (Optional) Volume Sync (With Conditions)
+  description: >
+    1) Automatically expand a B&O Mozart master device by adding another 
+    device (via JID) when the master enters a chosen state (e.g. playing).
+    2) If enabled, also sync the slave volume to the master.
+    3) Conditions can be set to restrict when the automation runs.
   domain: automation
   input:
-    media_player:
-      name: Media Player
+    master_device:
+      name: Master Device
+      description: "The B&O Mozart speaker that will expand and optionally control volume."
       selector:
         entity:
+          integration: bang_olufsen
           domain: media_player
-    volume_level:
-      name: Volume Level
-      description: "The volume level to set"
+    slave_device:
+      name: Slave Device (for Volume Sync)
+      description: >
+        The B&O Mozart speaker to be added to the master’s group,
+        and optionally have its volume synced to the master's.
       selector:
-        number:
-          min: 0.0
-          max: 1.0
-          step: 0.05
+        entity:
+          integration: bang_olufsen
+          domain: media_player
+    slave_jid:
+      name: Slave JID
+      description: >
+        JID of the device to be added when the master expands, for example:
+        1111.2222222.33333333@products.bang-olufsen.com
+      selector:
+        text:
+    trigger_condition:
+      name: Trigger Condition
+      description: >
+        The master's state that triggers expansion (commonly "playing" or "on").
+      selector:
+        select:
+          options:
+            - "playing"
+            - "on"
+    sync_volume:
+      name: Sync Volume?
+      description: >
+        If true, whenever the master's volume changes, 
+        set the slave's volume to match.
+      default: false
+      selector:
+        boolean:
     conditions:
-      name: Conditions
-      description: "Optional conditions that must be met for the automation to run."
+      name: Additional Conditions
+      description: >
+        Optional conditions that must be met before the automation runs.
+        For example: Only trigger if it's between certain hours, 
+        or if another sensor is in a specific state.
       default: []
       selector:
         condition: {}
 
-mode: restart
-
 trigger:
-  platform: state
-  entity_id: !input media_player
-  attribute: volume_level
+  # Trigger A: Expand when the master changes to the specified trigger_condition
+  - platform: state
+    entity_id: !input master_device
+    to: !input trigger_condition
+    id: expand_trigger
+  # Trigger B: Volume sync whenever the master’s volume changes (attribute: volume_level)
+  - platform: state
+    entity_id: !input master_device
+    attribute: volume_level
+    id: volume_sync_trigger
 
-condition: !input conditions
+variables:
+  # Store whether the user wants volume sync
+  is_sync_volume: !input sync_volume
 
 action:
-  - service: media_player.volume_set
-    target:
-      entity_id: !input media_player
-    data:
-      volume_level: !input volume_level
+  - choose:
+      # -- Condition 1: If the expand_trigger fired, check conditions before expanding
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.id == 'expand_trigger' }}"
+          - condition: and
+            conditions: !input conditions
+        sequence:
+          - service: bang_olufsen.beolink_expand
+            target:
+              entity_id: !input master_device
+            data:
+              beolink_jids:
+                - !input slave_jid
+      # -- Condition 2: If the volume_sync_trigger fired AND sync_volume is true, check conditions before syncing
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.id == 'volume_sync_trigger' and is_sync_volume }}"
+          - condition: and
+            conditions: !input conditions
+        sequence:
+          - service: media_player.volume_set
+            target:
+              entity_id: !input slave_device
+            data:
+              volume_level: "{{ trigger.to_state.attributes.volume_level }}"
+    default: []
